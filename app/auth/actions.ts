@@ -57,7 +57,14 @@ export async function register(formData: FormData) {
 
   const connectionCode = generateConnectionCode()
 
-  const { error: profileError } = await supabase.from('profiles').insert({
+  // Use admin client with service role key to insert profile (bypasses RLS during registration)
+  const { createClient: createAdminClient } = await import('@supabase/supabase-js')
+  const adminSupabase = createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+
+  const { error: profileError } = await adminSupabase.from('profiles').insert({
     id: authData.user.id,
     username,
     email,
@@ -66,6 +73,16 @@ export async function register(formData: FormData) {
 
   if (profileError) {
     return { error: profileError.message }
+  }
+
+  if (!authData.session) {
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    })
+    if (signInError) {
+      return { error: 'Account created, but could not log in automatically. Please sign in.' }
+    }
   }
 
   revalidatePath('/', 'layout')
