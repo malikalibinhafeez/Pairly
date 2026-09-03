@@ -8,8 +8,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Private Chat — Secure Messaging",
-  description: "A simple, private, and secure two-person real-time chat application.",
+  title: "Pairly — Private Messaging for Two",
+  description: "Pairly is a secure, real-time private chat app designed for just two people. Connect with a code and start messaging instantly.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
