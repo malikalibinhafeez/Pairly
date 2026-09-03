@@ -42,6 +42,26 @@ export async function register(formData: FormData) {
     return { error: 'Username must be at least 3 characters.' }
   }
 
+  const { createClient: createAdminClient } = await import('@supabase/supabase-js')
+  const adminSupabase = createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+
+  // Pre-check if username or email is already taken in profiles
+  const { data: existingProfile } = await adminSupabase
+    .from('profiles')
+    .select('username, email')
+    .or(`username.eq.${username},email.eq.${email}`)
+    .maybeSingle()
+
+  if (existingProfile) {
+    if (existingProfile.username.toLowerCase() === username.toLowerCase()) {
+      return { error: 'Username is already taken. Please choose another.' }
+    }
+    return { error: 'An account with this email already exists. Please sign in.' }
+  }
+
   const { data: authData, error: authError } = await supabase.auth.signUp({
     email,
     password,
@@ -51,18 +71,11 @@ export async function register(formData: FormData) {
     return { error: authError.message }
   }
 
-  if (!authData.user) {
-    return { error: 'Registration failed. Please try again.' }
+  if (!authData.user || (authData.user.identities && authData.user.identities.length === 0)) {
+    return { error: 'An account with this email already exists. Please sign in.' }
   }
 
   const connectionCode = generateConnectionCode()
-
-  // Use admin client with service role key to insert profile (bypasses RLS during registration)
-  const { createClient: createAdminClient } = await import('@supabase/supabase-js')
-  const adminSupabase = createAdminClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  )
 
   const { error: profileError } = await adminSupabase.from('profiles').insert({
     id: authData.user.id,
@@ -72,6 +85,12 @@ export async function register(formData: FormData) {
   })
 
   if (profileError) {
+    if (profileError.code === '23505') {
+      return { error: 'Username or email already in use. Please sign in or try another username.' }
+    }
+    if (profileError.code === '23503' || profileError.message.includes('foreign key')) {
+      return { error: 'An account with this email already exists. Please sign in.' }
+    }
     return { error: profileError.message }
   }
 
