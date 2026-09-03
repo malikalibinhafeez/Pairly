@@ -9,8 +9,9 @@
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- ============================================
--- 1. PROFILES TABLE
+-- 1. CREATE TABLES FIRST
 -- ============================================
+
 CREATE TABLE public.profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   username TEXT UNIQUE NOT NULL,
@@ -19,7 +20,56 @@ CREATE TABLE public.profiles (
   created_at TIMESTAMPTZ DEFAULT now() NOT NULL
 );
 
+CREATE TABLE public.chats (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user1_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  user2_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  user1_deleted_at TIMESTAMPTZ,
+  user2_deleted_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+  -- Ensure user1_id < user2_id to prevent duplicate chats
+  CONSTRAINT chats_user_order CHECK (user1_id < user2_id),
+  CONSTRAINT chats_unique_pair UNIQUE (user1_id, user2_id)
+);
+
+CREATE TABLE public.messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  chat_id UUID NOT NULL REFERENCES public.chats(id) ON DELETE CASCADE,
+  sender_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  message_type TEXT NOT NULL DEFAULT 'text' CHECK (message_type IN ('text', 'image', 'video')),
+  message TEXT,
+  file_path TEXT,
+  file_type TEXT,
+  file_size BIGINT,
+  deleted_for_everyone BOOLEAN DEFAULT false NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now() NOT NULL
+);
+
+CREATE TABLE public.message_deletions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  message_id UUID NOT NULL REFERENCES public.messages(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  deleted_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+  CONSTRAINT message_deletions_unique UNIQUE (message_id, user_id)
+);
+
+-- Indexes for performance
+CREATE INDEX idx_messages_chat_id ON public.messages(chat_id);
+CREATE INDEX idx_messages_created_at ON public.messages(chat_id, created_at);
+CREATE INDEX idx_message_deletions_user ON public.message_deletions(user_id);
+CREATE INDEX idx_message_deletions_message ON public.message_deletions(message_id);
+
+-- ============================================
+-- 2. ENABLE ROW LEVEL SECURITY
+-- ============================================
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.chats ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.message_deletions ENABLE ROW LEVEL SECURITY;
+
+-- ============================================
+-- 3. RLS POLICIES FOR PROFILES
+-- ============================================
 
 -- Users can read their own profile
 CREATE POLICY "Users can read own profile"
@@ -54,21 +104,8 @@ CREATE POLICY "Users can find profiles by connection code"
   USING (auth.uid() IS NOT NULL);
 
 -- ============================================
--- 2. CHATS TABLE
+-- 4. RLS POLICIES FOR CHATS
 -- ============================================
-CREATE TABLE public.chats (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user1_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-  user2_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-  user1_deleted_at TIMESTAMPTZ,
-  user2_deleted_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ DEFAULT now() NOT NULL,
-  -- Ensure user1_id < user2_id to prevent duplicate chats
-  CONSTRAINT chats_user_order CHECK (user1_id < user2_id),
-  CONSTRAINT chats_unique_pair UNIQUE (user1_id, user2_id)
-);
-
-ALTER TABLE public.chats ENABLE ROW LEVEL SECURITY;
 
 -- Users can see chats they participate in
 CREATE POLICY "Users can read own chats"
@@ -86,25 +123,8 @@ CREATE POLICY "Users can update own chat deletion"
   USING (auth.uid() = user1_id OR auth.uid() = user2_id);
 
 -- ============================================
--- 3. MESSAGES TABLE
+-- 5. RLS POLICIES FOR MESSAGES
 -- ============================================
-CREATE TABLE public.messages (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  chat_id UUID NOT NULL REFERENCES public.chats(id) ON DELETE CASCADE,
-  sender_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-  message_type TEXT NOT NULL DEFAULT 'text' CHECK (message_type IN ('text', 'image', 'video')),
-  message TEXT,
-  file_path TEXT,
-  file_type TEXT,
-  file_size BIGINT,
-  deleted_for_everyone BOOLEAN DEFAULT false NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT now() NOT NULL
-);
-
-CREATE INDEX idx_messages_chat_id ON public.messages(chat_id);
-CREATE INDEX idx_messages_created_at ON public.messages(chat_id, created_at);
-
-ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
 
 -- Users can read messages from chats they participate in
 CREATE POLICY "Users can read messages in own chats"
@@ -135,20 +155,8 @@ CREATE POLICY "Sender can unsend own messages"
   USING (auth.uid() = sender_id);
 
 -- ============================================
--- 4. MESSAGE_DELETIONS TABLE (Delete for me)
+-- 6. RLS POLICIES FOR MESSAGE_DELETIONS
 -- ============================================
-CREATE TABLE public.message_deletions (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  message_id UUID NOT NULL REFERENCES public.messages(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-  deleted_at TIMESTAMPTZ DEFAULT now() NOT NULL,
-  CONSTRAINT message_deletions_unique UNIQUE (message_id, user_id)
-);
-
-CREATE INDEX idx_message_deletions_user ON public.message_deletions(user_id);
-CREATE INDEX idx_message_deletions_message ON public.message_deletions(message_id);
-
-ALTER TABLE public.message_deletions ENABLE ROW LEVEL SECURITY;
 
 -- Users can read their own deletions
 CREATE POLICY "Users can read own message deletions"
@@ -161,12 +169,12 @@ CREATE POLICY "Users can create own message deletions"
   WITH CHECK (auth.uid() = user_id);
 
 -- ============================================
--- 5. ENABLE REALTIME
+-- 7. ENABLE REALTIME
 -- ============================================
 ALTER PUBLICATION supabase_realtime ADD TABLE public.messages;
 
 -- ============================================
--- 6. STORAGE BUCKET
+-- 8. STORAGE BUCKET & POLICIES
 -- ============================================
 -- Create a private storage bucket for chat media
 INSERT INTO storage.buckets (id, name, public)
