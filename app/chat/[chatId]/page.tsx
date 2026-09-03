@@ -72,7 +72,7 @@ export default async function ChatPage({ params }: Props) {
     // Re-fetch updated profiles
     const { data: updatedProfiles } = await adminSupabase
       .from('profiles')
-      .select('id, username, connection_code')
+      .select('id, username, connection_code, email')
       .in('id', participantIds)
 
     profiles = updatedProfiles
