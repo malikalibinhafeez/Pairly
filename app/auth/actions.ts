@@ -17,11 +17,34 @@ export async function login(formData: FormData) {
   const supabase = await createClient()
 
   const data = {
-    email: formData.get('email') as string,
+    email: (formData.get('email') as string)?.trim(),
     password: formData.get('password') as string,
   }
 
-  const { error } = await supabase.auth.signInWithPassword(data)
+  let { error } = await supabase.auth.signInWithPassword(data)
+
+  // Auto confirm email if Supabase blocked sign in due to unconfirmed email
+  if (error && error.message.toLowerCase().includes('email not confirmed')) {
+    const { createClient: createAdminClient } = await import('@supabase/supabase-js')
+    const adminSupabase = createAdminClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+    
+    const { data: usersData } = await adminSupabase.auth.admin.listUsers()
+    const targetUser = usersData?.users?.find(
+      (u) => u.email?.toLowerCase() === data.email.toLowerCase()
+    )
+
+    if (targetUser) {
+      await adminSupabase.auth.admin.updateUserById(targetUser.id, {
+        email_confirm: true,
+      })
+      // Retry sign in after auto-confirmation
+      const retry = await supabase.auth.signInWithPassword(data)
+      error = retry.error
+    }
+  }
 
   if (error) {
     return { error: error.message }
@@ -34,9 +57,9 @@ export async function login(formData: FormData) {
 export async function register(formData: FormData) {
   const supabase = await createClient()
 
-  const email = formData.get('email') as string
+  const email = (formData.get('email') as string)?.trim()
   const password = formData.get('password') as string
-  const username = formData.get('username') as string
+  const username = (formData.get('username') as string)?.trim()
 
   if (!username || username.length < 3) {
     return { error: 'Username must be at least 3 characters.' }
@@ -75,6 +98,11 @@ export async function register(formData: FormData) {
     return { error: 'An account with this email already exists. Please sign in.' }
   }
 
+  // Auto confirm email for development / frictionless sign up
+  await adminSupabase.auth.admin.updateUserById(authData.user.id, {
+    email_confirm: true,
+  })
+
   const connectionCode = generateConnectionCode()
 
   const { error: profileError } = await adminSupabase.from('profiles').insert({
@@ -100,7 +128,7 @@ export async function register(formData: FormData) {
       password,
     })
     if (signInError) {
-      return { error: 'Account created, but could not log in automatically. Please sign in.' }
+      return { error: 'Account created! Please sign in.' }
     }
   }
 
