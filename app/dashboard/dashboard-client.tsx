@@ -152,7 +152,9 @@ function ChatRow({ chatId, partnerUsername }: { chatId: string; partnerUsername:
   const [loading, setLoading] = useState(false)
   const [deleted, setDeleted] = useState(false)
 
-  async function handleDelete() {
+  async function handleDelete(e: React.MouseEvent) {
+    e.preventDefault()
+    e.stopPropagation()
     setLoading(true)
     await deleteChat(chatId)
     setDeleted(true)
@@ -162,45 +164,62 @@ function ChatRow({ chatId, partnerUsername }: { chatId: string; partnerUsername:
   if (deleted) return null
 
   return (
-    <div className="group flex items-center gap-4 bg-slate-900/60 hover:bg-slate-800/60 border border-slate-700/40 hover:border-slate-600/40 rounded-2xl px-5 py-4 transition-all">
-      <Link href={`/chat/${chatId}`} className="flex items-center gap-4 flex-1 min-w-0">
-        <div className="w-11 h-11 rounded-full bg-gradient-to-br from-indigo-500/30 to-violet-600/30 border border-indigo-500/20 flex items-center justify-center shrink-0">
-          <span className="text-lg font-bold text-indigo-300">
-            {partnerUsername[0]?.toUpperCase() ?? '?'}
-          </span>
+    <div className="relative bg-slate-900/60 hover:bg-slate-800/60 border border-slate-700/40 hover:border-slate-600/40 rounded-2xl transition-all overflow-hidden active:scale-[0.99] touch-manipulation">
+      <Link
+        href={`/chat/${chatId}`}
+        className="flex items-center justify-between gap-4 px-5 py-4 w-full h-full cursor-pointer"
+      >
+        <div className="flex items-center gap-4 min-w-0 flex-1">
+          <div className="w-11 h-11 rounded-full bg-gradient-to-br from-indigo-500/30 to-violet-600/30 border border-indigo-500/20 flex items-center justify-center shrink-0">
+            <span className="text-lg font-bold text-indigo-300">
+              {partnerUsername[0]?.toUpperCase() ?? '?'}
+            </span>
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold text-white truncate text-base">@{partnerUsername}</p>
+            <p className="text-indigo-400 text-xs flex items-center gap-1 font-medium mt-0.5">
+              <span>Tap to open chat</span>
+              <span>→</span>
+            </p>
+          </div>
         </div>
-        <div className="min-w-0">
-          <p className="font-semibold text-white truncate">@{partnerUsername}</p>
-          <p className="text-slate-500 text-xs">Tap to open chat</p>
-        </div>
+
+        {confirming ? (
+          <div className="flex gap-2 shrink-0 z-10" onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+            <button
+              onClick={handleDelete}
+              disabled={loading}
+              className="text-xs px-3 py-1.5 rounded-lg bg-red-500/20 border border-red-500/30 text-red-400 transition-all font-medium"
+            >
+              {loading ? '...' : 'Yes, delete'}
+            </button>
+            <button
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                setConfirming(false)
+              }}
+              className="text-xs px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 transition-all"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setConfirming(true)
+            }}
+            className="p-2 rounded-xl text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-all shrink-0 z-10"
+            title="Delete chat"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.75} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+            </svg>
+          </button>
+        )}
       </Link>
-      {confirming ? (
-        <div className="flex gap-2 shrink-0">
-          <button
-            onClick={handleDelete}
-            disabled={loading}
-            className="text-xs px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 transition-all"
-          >
-            {loading ? '...' : 'Yes, delete'}
-          </button>
-          <button
-            onClick={() => setConfirming(false)}
-            className="text-xs px-3 py-1.5 rounded-lg bg-slate-700/40 hover:bg-slate-700/60 text-slate-400 transition-all"
-          >
-            Cancel
-          </button>
-        </div>
-      ) : (
-        <button
-          onClick={() => setConfirming(true)}
-          className="opacity-0 group-hover:opacity-100 p-2 rounded-xl text-slate-600 hover:text-red-400 hover:bg-red-500/10 transition-all shrink-0"
-          title="Delete chat"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
-          </svg>
-        </button>
-      )}
     </div>
   )
 }
