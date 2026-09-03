@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 
@@ -10,6 +10,14 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "Pairly — Private Messaging for Two",
   description: "Pairly is a secure, real-time private chat app designed for just two people. Connect with a code and start messaging instantly.",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  themeColor: "#020617",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

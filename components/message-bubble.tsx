@@ -11,6 +11,7 @@ interface Message {
   file_type: string | null
   deleted_for_everyone: boolean
   created_at: string
+  seen?: boolean
 }
 
 interface MessageBubbleProps {
@@ -128,12 +129,23 @@ export default function MessageBubble({ message, isOwn, onDelete }: MessageBubbl
             <p className="text-sm whitespace-pre-wrap break-words">{message.message}</p>
           )}
 
-          {/* Timestamp */}
-          <p className={`text-[10px] mt-1 text-right ${
-            isOwn ? 'text-indigo-300/60' : 'text-slate-500'
-          }`}>
-            {time}
-          </p>
+          {/* Timestamp & Seen status */}
+          <div className="flex items-center justify-end gap-1.5 mt-1">
+            <span className={`text-[10px] ${isOwn ? 'text-indigo-300/70' : 'text-slate-400'}`}>
+              {time}
+            </span>
+            {isOwn && (
+              message.seen ? (
+                <span className="text-[11px] text-sky-400 font-bold flex items-center gap-0.5" title="Seen">
+                  ✓✓ <span className="text-[9px] font-normal opacity-90">Seen</span>
+                </span>
+              ) : (
+                <span className="text-[11px] text-slate-400 font-semibold" title="Sent">
+                  ✓
+                </span>
+              )
+            )}
+          </div>
         </div>
 
         {/* Three-dot menu button */}

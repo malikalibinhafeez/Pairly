@@ -16,10 +16,10 @@ export default async function ChatPage({ params }: Props) {
 
   if (!user) redirect('/auth/login')
 
-  // Verify user is a participant in this chat
+  // Verify user is a participant in this chat and fetch passcode
   const { data: chat } = await supabase
     .from('chats')
-    .select('id, user1_id, user2_id')
+    .select('id, user1_id, user2_id, passcode')
     .eq('id', chatId)
     .or(`user1_id.eq.${user.id},user2_id.eq.${user.id}`)
     .single()
@@ -28,11 +28,16 @@ export default async function ChatPage({ params }: Props) {
 
   const partnerId = chat.user1_id === user.id ? chat.user2_id : chat.user1_id
 
-  const { data: partner } = await supabase
+  // Fetch both participant profiles (to get their signup connection codes)
+  const { data: profiles } = await supabase
     .from('profiles')
-    .select('username')
-    .eq('id', partnerId)
-    .single()
+    .select('id, username, connection_code')
+    .in('id', [chat.user1_id, chat.user2_id])
+
+  const partnerProfile = profiles?.find((p) => p.id === partnerId)
+  const unlockCodes = (profiles ?? [])
+    .map((p) => p.connection_code?.toUpperCase())
+    .filter((code): code is string => Boolean(code))
 
   // Fetch initial messages (not deleted by this user)
   const { data: messageDeletedIds } = await supabase
@@ -73,8 +78,9 @@ export default async function ChatPage({ params }: Props) {
     <ChatClient
       chatId={chatId}
       currentUserId={user.id}
-      partnerUsername={partner?.username ?? 'Unknown'}
+      partnerUsername={partnerProfile?.username ?? 'Unknown'}
       initialMessages={visibleMessages}
+      unlockCodes={unlockCodes}
     />
   )
 }

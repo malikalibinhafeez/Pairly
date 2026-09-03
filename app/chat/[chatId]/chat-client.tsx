@@ -15,6 +15,7 @@ interface Message {
   file_type: string | null
   deleted_for_everyone: boolean
   created_at: string
+  seen?: boolean
 }
 
 interface Props {
@@ -22,6 +23,7 @@ interface Props {
   currentUserId: string
   partnerUsername: string
   initialMessages: Message[]
+  unlockCodes: string[] // Signup connection codes for both participants
 }
 
 export default function ChatClient({
@@ -29,20 +31,96 @@ export default function ChatClient({
   currentUserId,
   partnerUsername,
   initialMessages,
+  unlockCodes,
 }: Props) {
   const [messages, setMessages] = useState<Message[]>(initialMessages)
   const [text, setText] = useState('')
-  const [sending, setSending] = useState(false)
   const [uploading, setUploading] = useState(false)
+
+  // Presence State (Online / Offline indicator)
+  const [isPartnerOnline, setIsPartnerOnline] = useState(false)
+
+  // Session Lock State (Locks every time tab/browser/app is closed & re-opened)
+  const [isUnlocked, setIsUnlocked] = useState<boolean>(false)
+  const [codeInput, setCodeInput] = useState('')
+  const [codeError, setCodeError] = useState<string | null>(null)
+
   const bottomRef = useRef<HTMLDivElement>(null)
   const supabase = createClient()
 
-  // Scroll to bottom
+  // Session-based Lock Check
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+    const unlockStatus = sessionStorage.getItem(`chat_unlocked_${chatId}`)
+    if (unlockStatus === 'true') {
+      setIsUnlocked(true)
+    } else {
+      setIsUnlocked(false)
+    }
+  }, [chatId])
 
-  // Realtime subscription
+  // Scroll to bottom when unlocked and new messages arrive
+  useEffect(() => {
+    if (isUnlocked) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [messages, isUnlocked])
+
+  // 🔴 1. REALTIME PRESENCE TRACKING (ONLINE / OFFLINE)
+  useEffect(() => {
+    if (!isUnlocked) return
+
+    const channel = supabase.channel(`presence:chat:${chatId}`, {
+      config: { presence: { key: currentUserId } },
+    })
+
+    channel
+      .on('presence', { event: 'sync' }, () => {
+        const state = channel.presenceState()
+        const userIds = Object.keys(state)
+        const partnerActive = userIds.some((id) => id !== currentUserId)
+        setIsPartnerOnline(partnerActive)
+      })
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          await channel.track({ online_at: new Date().toISOString() })
+        }
+      })
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [chatId, currentUserId, isUnlocked, supabase])
+
+  // 👁️ 2. MARK MESSAGES AS SEEN (READ RECEIPTS)
+  const markMessagesAsSeen = useCallback(async () => {
+    if (!isUnlocked) return
+
+    // Find any unread messages sent by partner
+    const hasUnread = messages.some(
+      (m) => m.sender_id !== currentUserId && !m.seen
+    )
+
+    if (hasUnread) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.sender_id !== currentUserId ? { ...m, seen: true } : m
+        )
+      )
+      await fetch('/api/messages/read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId }),
+      })
+    }
+  }, [chatId, currentUserId, isUnlocked, messages])
+
+  useEffect(() => {
+    if (isUnlocked) {
+      markMessagesAsSeen()
+    }
+  }, [isUnlocked, messages.length, markMessagesAsSeen])
+
+  // 📡 3. REALTIME MESSAGES & UPDATES SUBSCRIPTION
   useEffect(() => {
     const channel = supabase
       .channel(`chat:${chatId}`)
@@ -58,7 +136,18 @@ export default function ChatClient({
           if (payload.eventType === 'INSERT') {
             const newMsg = payload.new as Message
             setMessages((prev) => {
-              if (prev.find((m) => m.id === newMsg.id)) return prev
+              if (prev.some((m) => m.id === newMsg.id)) return prev
+              const tempIdx = prev.findIndex(
+                (m) =>
+                  m.id.startsWith('temp-') &&
+                  m.sender_id === newMsg.sender_id &&
+                  m.message === newMsg.message
+              )
+              if (tempIdx !== -1) {
+                const updated = [...prev]
+                updated[tempIdx] = newMsg
+                return updated
+              }
               return [...prev, newMsg]
             })
           } else if (payload.eventType === 'UPDATE') {
@@ -75,24 +164,58 @@ export default function ChatClient({
     }
   }, [chatId, supabase])
 
+  // Unlock Chat Form Submit
+  function handleUnlock(e: React.FormEvent) {
+    e.preventDefault()
+    setCodeError(null)
+
+    const entered = codeInput.trim().toUpperCase()
+    const formattedValidCodes = unlockCodes.map((c) => c.trim().toUpperCase())
+
+    if (formattedValidCodes.includes(entered)) {
+      sessionStorage.setItem(`chat_unlocked_${chatId}`, 'true')
+      setIsUnlocked(true)
+      setCodeInput('')
+    } else {
+      setCodeError('Incorrect Connection Code! Enter the signup code of either user.')
+    }
+  }
+
   async function sendText(e: React.FormEvent) {
     e.preventDefault()
     const trimmed = text.trim()
-    if (!trimmed || sending) return
+    if (!trimmed) return
 
-    setSending(true)
+    const tempId = `temp-${Date.now()}-${Math.random()}`
+    const tempMsg: Message = {
+      id: tempId,
+      sender_id: currentUserId,
+      message_type: 'text',
+      message: trimmed,
+      file_path: null,
+      file_type: null,
+      deleted_for_everyone: false,
+      created_at: new Date().toISOString(),
+      seen: false,
+    }
+
+    // ⚡ Optimistic Update: Instant UI update
+    setMessages((prev) => [...prev, tempMsg])
     setText('')
 
-    const res = await fetch('/api/messages/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chatId, message: trimmed }),
-    })
+    try {
+      const res = await fetch('/api/messages/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId, message: trimmed }),
+      })
 
-    if (!res.ok) {
-      console.error('Send failed')
+      if (!res.ok) {
+        setMessages((prev) => prev.filter((m) => m.id !== tempId))
+      }
+    } catch {
+      setMessages((prev) => prev.filter((m) => m.id !== tempId))
     }
-    setSending(false)
   }
 
   async function handleFileSelected(file: File) {
@@ -134,47 +257,95 @@ export default function ChatClient({
   )
 
   return (
-    <div className="flex flex-col h-screen bg-slate-950">
+    <div className="flex flex-col h-[100dvh] bg-slate-950 overflow-hidden relative select-none">
+
+      {/* 🔒 SIGNUP CONNECTION CODE LOCK SCREEN */}
+      {!isUnlocked && (
+        <div className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-2xl flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-slate-900/90 border border-slate-800 rounded-3xl p-8 shadow-2xl text-center relative z-10">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500/20 to-violet-600/20 border border-indigo-500/30 flex items-center justify-center mx-auto mb-5 shadow-lg shadow-indigo-500/10">
+              <svg className="w-8 h-8 text-indigo-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.75} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
+              </svg>
+            </div>
+
+            <h2 className="text-xl font-bold text-white mb-1">Chat Locked 🔒</h2>
+            <p className="text-slate-400 text-xs mb-6">
+              Enter the 12-character Connection Code (signup code of either user) to open this chat with @{partnerUsername}.
+            </p>
+
+            {codeError && (
+              <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs">
+                {codeError}
+              </div>
+            )}
+
+            <form onSubmit={handleUnlock} className="space-y-4">
+              <input
+                type="text"
+                value={codeInput}
+                onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
+                maxLength={12}
+                placeholder="12-CHAR CODE"
+                className="w-full px-4 py-3 rounded-xl bg-slate-800/80 border border-slate-700/60 text-white text-center font-mono tracking-widest uppercase placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-base"
+                autoFocus
+              />
+              <button
+                type="submit"
+                className="w-full py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 text-white font-semibold hover:from-indigo-600 hover:to-violet-700 transition-all text-sm shadow-lg shadow-indigo-500/20"
+              >
+                Unlock Chat
+              </button>
+            </form>
+
+            <Link href="/dashboard" className="block mt-4 text-xs text-slate-500 hover:text-slate-400">
+              ← Back to Dashboard
+            </Link>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header className="shrink-0 border-b border-slate-800/60 bg-slate-950/90 backdrop-blur-xl z-10">
-        <div className="max-w-3xl mx-auto px-4 py-3.5 flex items-center gap-4">
+        <div className="max-w-3xl mx-auto px-3 sm:px-4 py-3 flex items-center gap-3">
           <Link
             href="/dashboard"
-            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/60 transition-all"
+            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/60 transition-all shrink-0"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
             </svg>
           </Link>
-          <div className="flex items-center gap-3 flex-1 min-w-0">
-            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500/40 to-violet-600/40 border border-indigo-500/20 flex items-center justify-center shrink-0">
+
+          <div className="flex items-center gap-2.5 flex-1 min-w-0">
+            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500/40 to-violet-600/40 border border-indigo-500/20 flex items-center justify-center shrink-0 relative">
               <span className="text-sm font-bold text-indigo-300">
                 {partnerUsername[0]?.toUpperCase()}
               </span>
+              {isPartnerOnline && (
+                <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-slate-950" />
+              )}
             </div>
             <div className="min-w-0">
               <p className="font-semibold text-white text-sm truncate">@{partnerUsername}</p>
-              <p className="text-xs text-emerald-400 flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
-                Private chat
-              </p>
+              {isPartnerOnline ? (
+                <p className="text-[11px] text-emerald-400 font-medium flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block animate-pulse" />
+                  Online
+                </p>
+              ) : (
+                <p className="text-[11px] text-slate-400 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-slate-500 inline-block" />
+                  Offline
+                </p>
+              )}
             </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center">
-              <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 0 1-.825-.242m9.345-8.334a2.126 2.126 0 0 0-.476-.095 48.64 48.64 0 0 0-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0 0 11.25 3c-2.115 0-4.198.137-6.24.402-1.608.209-2.76 1.614-2.76 3.235v6.226c0 1.621 1.152 3.026 2.76 3.235.577.075 1.157.14 1.74.194V21l4.155-4.155" />
-              </svg>
-            </div>
-            <span className="font-bold text-sm bg-gradient-to-r from-indigo-400 to-violet-400 bg-clip-text text-transparent hidden sm:block">
-              Pairly
-            </span>
           </div>
         </div>
       </header>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div className="flex-1 overflow-y-auto px-3 sm:px-4 py-4">
         <div className="max-w-3xl mx-auto space-y-1">
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-48 text-center">
@@ -201,8 +372,8 @@ export default function ChatClient({
 
       {/* Input bar */}
       <div className="shrink-0 border-t border-slate-800/60 bg-slate-950/90 backdrop-blur-xl">
-        <div className="max-w-3xl mx-auto px-4 py-3">
-          <form onSubmit={sendText} className="flex items-end gap-3">
+        <div className="max-w-3xl mx-auto px-3 sm:px-4 py-2.5 sm:py-3">
+          <form onSubmit={sendText} className="flex items-end gap-2 sm:gap-3">
             <FileUpload onFileSelected={handleFileSelected} uploading={uploading} />
             <div className="flex-1 relative">
               <textarea
@@ -217,25 +388,18 @@ export default function ChatClient({
                 }}
                 placeholder={`Message @${partnerUsername}…`}
                 rows={1}
-                className="w-full px-4 py-3 rounded-2xl bg-slate-800/60 border border-slate-700/40 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500/40 transition-all text-sm resize-none max-h-36 leading-relaxed"
+                className="w-full px-4 py-3 rounded-2xl bg-slate-800/60 border border-slate-700/40 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500/40 transition-all text-base sm:text-sm resize-none max-h-36 leading-relaxed"
               />
             </div>
             <button
               id="send-btn"
               type="submit"
-              disabled={!text.trim() || sending}
-              className="p-3 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white disabled:opacity-40 disabled:cursor-not-allowed hover:from-indigo-600 hover:to-violet-700 transition-all shadow-lg shadow-indigo-500/20 active:scale-95"
+              disabled={!text.trim()}
+              className="p-3 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white disabled:opacity-40 disabled:cursor-not-allowed hover:from-indigo-600 hover:to-violet-700 transition-all shadow-lg shadow-indigo-500/20 active:scale-95 shrink-0"
             >
-              {sending ? (
-                <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-              ) : (
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
-                </svg>
-              )}
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
+              </svg>
             </button>
           </form>
         </div>
