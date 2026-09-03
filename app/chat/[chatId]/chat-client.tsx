@@ -58,6 +58,30 @@ export default function ChatClient({
     }
   }, [chatId])
 
+  // 🔒 INSTANT AUTO-LOCK ON APP SWITCH, FLOATING WINDOW, TAB BLUR & SCREEN LOCK
+  useEffect(() => {
+    function lockChatOnSwitch() {
+      sessionStorage.removeItem(`chat_unlocked_${chatId}`)
+      setIsUnlocked(false)
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'hidden') {
+        lockChatOnSwitch()
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('blur', lockChatOnSwitch)
+    window.addEventListener('pagehide', lockChatOnSwitch)
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('blur', lockChatOnSwitch)
+      window.removeEventListener('pagehide', lockChatOnSwitch)
+    }
+  }, [chatId])
+
   // Scroll to bottom when unlocked and new messages arrive
   useEffect(() => {
     if (isUnlocked) {
