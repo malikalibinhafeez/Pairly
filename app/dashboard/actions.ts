@@ -19,12 +19,18 @@ export async function connectWithCode(formData: FormData) {
     return { error: 'Please enter a valid 12-character connection code.' }
   }
 
+  const { createClient: createAdminClient } = await import('@supabase/supabase-js')
+  const adminSupabase = createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+
   // Find the partner by code
-  const { data: partner, error: partnerError } = await supabase
+  const { data: partner, error: partnerError } = await adminSupabase
     .from('profiles')
     .select('id, username')
     .eq('connection_code', code)
-    .single()
+    .maybeSingle()
 
   if (partnerError || !partner) {
     return { error: 'No user found with that code. Please double-check.' }
@@ -34,31 +40,63 @@ export async function connectWithCode(formData: FormData) {
     return { error: "That's your own code! Share it with someone else." }
   }
 
+  // Ensure current user profile exists in profiles table
+  const { data: currentUserProfile } = await adminSupabase
+    .from('profiles')
+    .select('id')
+    .eq('id', user.id)
+    .maybeSingle()
+
+  if (!currentUserProfile) {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+    let myCode = ''
+    for (let i = 0; i < 12; i++) {
+      myCode += chars[Math.floor(Math.random() * chars.length)]
+    }
+    await adminSupabase.from('profiles').upsert(
+      {
+        id: user.id,
+        username: user.email?.split('@')[0] || `user_${user.id.slice(0, 5)}`,
+        email: user.email ?? '',
+        connection_code: myCode,
+      },
+      { onConflict: 'id' }
+    )
+  }
+
   // Determine user1/user2 order (user1_id < user2_id)
   const user1_id = user.id < partner.id ? user.id : partner.id
   const user2_id = user.id < partner.id ? partner.id : user.id
 
   // Check if chat already exists
-  const { data: existing } = await supabase
+  const { data: existing } = await adminSupabase
     .from('chats')
-    .select('id')
+    .select('id, user1_deleted_at, user2_deleted_at')
     .eq('user1_id', user1_id)
     .eq('user2_id', user2_id)
-    .single()
+    .maybeSingle()
 
   if (existing) {
+    // Reset deletion timestamp if it was deleted previously
+    const isUser1 = user.id === user1_id
+    const field = isUser1 ? 'user1_deleted_at' : 'user2_deleted_at'
+    await adminSupabase
+      .from('chats')
+      .update({ [field]: null })
+      .eq('id', existing.id)
+
     redirect(`/chat/${existing.id}`)
   }
 
   // Create new chat
-  const { data: newChat, error: chatError } = await supabase
+  const { data: newChat, error: chatError } = await adminSupabase
     .from('chats')
     .insert({ user1_id, user2_id })
     .select('id')
     .single()
 
   if (chatError || !newChat) {
-    return { error: 'Could not create chat. Please try again.' }
+    return { error: chatError?.message || 'Could not create chat. Please try again.' }
   }
 
   revalidatePath('/dashboard')

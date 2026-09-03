@@ -14,11 +14,46 @@ export default async function DashboardPage() {
 
   if (!user) redirect('/auth/login')
 
-  const { data: profile } = await supabase
+  let { data: profile } = await supabase
     .from('profiles')
     .select('username, connection_code')
     .eq('id', user.id)
-    .single()
+    .maybeSingle()
+
+  // If profile is missing (e.g. registered before fix), auto-create it now
+  if (!profile) {
+    const { createClient: createAdminClient } = await import('@supabase/supabase-js')
+    const adminSupabase = createAdminClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+    let code = ''
+    for (let i = 0; i < 12; i++) {
+      code += chars[Math.floor(Math.random() * chars.length)]
+    }
+
+    const username = user.email?.split('@')[0] || `user_${user.id.slice(0, 5)}`
+
+    const { data: createdProfile } = await adminSupabase
+      .from('profiles')
+      .upsert(
+        {
+          id: user.id,
+          username,
+          email: user.email ?? '',
+          connection_code: code,
+        },
+        { onConflict: 'id' }
+      )
+      .select('username, connection_code')
+      .single()
+
+    if (createdProfile) {
+      profile = createdProfile
+    }
+  }
 
   // Get all chats for this user
   const { data: allChats } = await supabase
