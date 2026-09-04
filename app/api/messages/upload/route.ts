@@ -10,8 +10,15 @@ const ALLOWED_TYPES = [
   'video/mp4',
   'video/webm',
   'video/quicktime',
+  'audio/webm',
+  'audio/mp4',
+  'audio/ogg',
+  'audio/wav',
+  'audio/m4a',
+  'audio/aac',
+  'audio/x-m4a',
 ]
-const MAX_SIZE = 10 * 1024 * 1024 // 10MB
+const MAX_SIZE = 25 * 1024 * 1024 // 25MB
 
 export async function POST(request: NextRequest) {
   const supabase = await createServerClient()

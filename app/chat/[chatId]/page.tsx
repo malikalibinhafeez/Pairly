@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import ChatClient from './chat-client'
 
 interface Props {
@@ -16,86 +17,26 @@ export default async function ChatPage({ params }: Props) {
 
   if (!user) redirect('/auth/login')
 
-  const { createClient: createAdminClient } = await import('@supabase/supabase-js')
-  const adminSupabase = createAdminClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  )
+  const adminSupabase = createAdminClient()
 
-  // Fetch chat details using admin client to prevent RLS query failure on mobile
+  // 1. Fetch chat details
   const { data: chat } = await adminSupabase
     .from('chats')
     .select('id, user1_id, user2_id, user1_deleted_at, user2_deleted_at')
     .eq('id', chatId)
     .maybeSingle()
 
-  // Security Check: Verify user is one of the two chat participants
   if (!chat || (chat.user1_id !== user.id && chat.user2_id !== user.id)) {
     redirect('/dashboard')
   }
 
   const partnerId = chat.user1_id === user.id ? chat.user2_id : chat.user1_id
   const participantIds = [chat.user1_id, chat.user2_id]
-
-  // Fetch profiles for both participants
-  let { data: profiles } = await adminSupabase
-    .from('profiles')
-    .select('id, username, connection_code, email')
-    .in('id', participantIds)
-
-  // Check if any participant profile is missing or lacks a connection_code (legacy users)
-  const missingProfiles = participantIds.filter(
-    (id) => !profiles?.some((p) => p.id === id && p.connection_code)
-  )
-
-  if (missingProfiles.length > 0) {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-    for (const missingId of missingProfiles) {
-      let newCode = ''
-      for (let i = 0; i < 12; i++) {
-        newCode += chars[Math.floor(Math.random() * chars.length)]
-      }
-      const existing = profiles?.find((p) => p.id === missingId)
-      const fallbackName = existing?.username || `user_${missingId.slice(0, 5)}`
-
-      await adminSupabase.from('profiles').upsert(
-        {
-          id: missingId,
-          username: fallbackName,
-          email: existing?.email || '',
-          connection_code: newCode,
-        },
-        { onConflict: 'id' }
-      )
-    }
-
-    // Re-fetch updated profiles
-    const { data: updatedProfiles } = await adminSupabase
-      .from('profiles')
-      .select('id, username, connection_code, email')
-      .in('id', participantIds)
-
-    profiles = updatedProfiles
-  }
-
-  const partnerProfile = profiles?.find((p) => p.id === partnerId)
-  const unlockCodes = (profiles ?? [])
-    .map((p) => p.connection_code?.toUpperCase())
-    .filter((code): code is string => Boolean(code))
-
-  // Fetch message deletions for current user
-  const { data: messageDeletedIds } = await adminSupabase
-    .from('message_deletions')
-    .select('message_id')
-    .eq('user_id', user.id)
-
-  const deletedIds = (messageDeletedIds ?? []).map((d) => d.message_id)
-
-  // Per-user chat deletion timestamp
   const isUser1 = chat.user1_id === user.id
   const deletedAt = isUser1 ? chat.user1_deleted_at : chat.user2_deleted_at
 
-  let query = adminSupabase
+  // 2. Fetch profiles, message deletions, and messages IN PARALLEL
+  let messagesQuery = adminSupabase
     .from('messages')
     .select('*')
     .eq('chat_id', chatId)
@@ -103,13 +44,40 @@ export default async function ChatPage({ params }: Props) {
     .limit(100)
 
   if (deletedAt) {
-    query = query.gt('created_at', deletedAt)
+    messagesQuery = messagesQuery.gt('created_at', deletedAt)
   }
 
-  const { data: messages } = await query
+  const [profilesRes, deletionsRes, messagesRes] = await Promise.all([
+    adminSupabase.from('profiles').select('id, username, connection_code, email').in('id', participantIds),
+    adminSupabase.from('message_deletions').select('message_id').eq('user_id', user.id),
+    messagesQuery,
+  ])
 
-  const visibleMessages = (messages ?? []).filter(
-    (m) => !deletedIds.includes(m.id)
+  const profiles = profilesRes.data || []
+  const deletedIds = (deletionsRes.data || []).map((d) => d.message_id)
+  const messages = messagesRes.data || []
+
+  const partnerProfile = profiles.find((p) => p.id === partnerId)
+  const unlockCodes = profiles.map((p) => p.connection_code?.toUpperCase()).filter(Boolean) as string[]
+
+  // Filter visible messages
+  const visibleMessages = messages.filter((m) => !deletedIds.includes(m.id))
+
+  // 3. Pre-generate media signed URLs for media messages in parallel
+  const messagesWithMedia = await Promise.all(
+    visibleMessages.map(async (msg) => {
+      if (msg.file_path && !msg.deleted_for_everyone) {
+        try {
+          const { data } = await adminSupabase.storage
+            .from('chat-media')
+            .createSignedUrl(msg.file_path, 3600)
+          return { ...msg, media_url: data?.signedUrl || null }
+        } catch {
+          return msg
+        }
+      }
+      return msg
+    })
   )
 
   return (
@@ -117,7 +85,7 @@ export default async function ChatPage({ params }: Props) {
       chatId={chatId}
       currentUserId={user.id}
       partnerUsername={partnerProfile?.username ?? 'Unknown'}
-      initialMessages={visibleMessages}
+      initialMessages={messagesWithMedia}
       unlockCodes={unlockCodes}
     />
   )

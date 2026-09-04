@@ -89,6 +89,22 @@ export default function RegisterPage() {
               />
             </div>
             <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2" htmlFor="reg-codeword">
+                Code Word (Secret Connection Code)
+              </label>
+              <input
+                id="reg-codeword"
+                name="codeWord"
+                type="text"
+                required
+                minLength={3}
+                maxLength={20}
+                placeholder="e.g. MYSECRET123"
+                className="w-full px-4 py-3 rounded-xl bg-slate-800/60 border border-slate-700/50 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition-all text-sm uppercase tracking-wide font-mono"
+              />
+              <p className="mt-1.5 text-xs text-slate-500">Others will enter this Code Word to start a chat with you</p>
+            </div>
+            <div>
               <label className="block text-sm font-medium text-slate-300 mb-2" htmlFor="reg-password">
                 Password
               </label>

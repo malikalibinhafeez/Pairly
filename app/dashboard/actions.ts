@@ -15,8 +15,8 @@ export async function connectWithCode(formData: FormData) {
 
   const code = (formData.get('code') as string)?.trim().toUpperCase()
 
-  if (!code || code.length !== 12) {
-    return { error: 'Please enter a valid 12-character connection code.' }
+  if (!code || code.length < 3) {
+    return { error: 'Please enter a valid Code Word (at least 3 characters).' }
   }
 
   const { createClient: createAdminClient } = await import('@supabase/supabase-js')
@@ -25,7 +25,7 @@ export async function connectWithCode(formData: FormData) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   )
 
-  // Find the partner by code
+  // Find the partner by code Word
   const { data: partner, error: partnerError } = await adminSupabase
     .from('profiles')
     .select('id, username')
@@ -33,7 +33,7 @@ export async function connectWithCode(formData: FormData) {
     .maybeSingle()
 
   if (partnerError || !partner) {
-    return { error: 'No user found with that code. Please double-check.' }
+    return { error: 'No user found with that Code Word. Please double-check.' }
   }
 
   if (partner.id === user.id) {

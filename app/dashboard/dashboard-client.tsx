@@ -26,9 +26,9 @@ export default function DashboardClient({ connectionCode, chatList, username }: 
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 0 1 21.75 8.25Z" />
             </svg>
           </div>
-          <h2 className="font-semibold text-white">Your Connection Code</h2>
+          <h2 className="font-semibold text-white">Your Code Word</h2>
         </div>
-        <p className="text-slate-400 text-sm mb-4">Share this code with someone to start a private chat</p>
+        <p className="text-slate-400 text-sm mb-4">Share this Code Word with someone to start a private chat</p>
         <div className="flex items-center gap-3">
           <div className="flex-1 bg-slate-800/80 border border-slate-700/40 rounded-xl px-4 py-3">
             <span className="font-mono text-xl font-bold tracking-[0.2em] bg-gradient-to-r from-indigo-400 to-violet-400 bg-clip-text text-transparent">
@@ -49,7 +49,7 @@ export default function DashboardClient({ connectionCode, chatList, username }: 
           </div>
           <h2 className="font-semibold text-white">Connect with Someone</h2>
         </div>
-        <p className="text-slate-400 text-sm mb-4">Enter their 12-character code to start chatting</p>
+        <p className="text-slate-400 text-sm mb-4">Enter their Code Word to start chatting</p>
         <ConnectForm />
       </div>
 
@@ -127,8 +127,8 @@ function ConnectForm() {
           id="connect-code-input"
           name="code"
           type="text"
-          maxLength={12}
-          placeholder="Enter 12-char code"
+          maxLength={20}
+          placeholder="Enter Code Word (e.g. MYSECRET123)"
           className="flex-1 px-4 py-3 rounded-xl bg-slate-800/60 border border-slate-700/50 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500/50 focus:border-violet-500/50 transition-all text-sm font-mono tracking-wider uppercase"
         />
         <button
@@ -151,6 +151,7 @@ function ChatRow({ chatId, partnerUsername }: { chatId: string; partnerUsername:
   const [confirming, setConfirming] = useState(false)
   const [loading, setLoading] = useState(false)
   const [deleted, setDeleted] = useState(false)
+  const [isOpening, setIsOpening] = useState(false)
 
   async function handleDelete(e: React.MouseEvent) {
     e.preventDefault()
@@ -167,6 +168,7 @@ function ChatRow({ chatId, partnerUsername }: { chatId: string; partnerUsername:
     <div className="relative bg-slate-900/60 hover:bg-slate-800/60 border border-slate-700/40 hover:border-slate-600/40 rounded-2xl transition-all overflow-hidden active:scale-[0.99] touch-manipulation">
       <Link
         href={`/chat/${chatId}`}
+        onClick={() => setIsOpening(true)}
         className="flex items-center justify-between gap-4 px-5 py-4 w-full h-full cursor-pointer"
       >
         <div className="flex items-center gap-4 min-w-0 flex-1">
@@ -177,10 +179,20 @@ function ChatRow({ chatId, partnerUsername }: { chatId: string; partnerUsername:
           </div>
           <div className="min-w-0 flex-1">
             <p className="font-semibold text-white truncate text-base">@{partnerUsername}</p>
-            <p className="text-indigo-400 text-xs flex items-center gap-1 font-medium mt-0.5">
-              <span>Tap to open chat</span>
-              <span>→</span>
-            </p>
+            {isOpening ? (
+              <p className="text-emerald-400 text-xs flex items-center gap-1.5 font-medium mt-0.5 animate-pulse">
+                <svg className="animate-spin h-3 w-3 text-emerald-400" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                <span>Opening chat…</span>
+              </p>
+            ) : (
+              <p className="text-indigo-400 text-xs flex items-center gap-1 font-medium mt-0.5">
+                <span>Tap to open chat</span>
+                <span>→</span>
+              </p>
+            )}
           </div>
         </div>
 
@@ -223,3 +235,4 @@ function ChatRow({ chatId, partnerUsername }: { chatId: string; partnerUsername:
     </div>
   )
 }
+
