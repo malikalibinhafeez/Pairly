@@ -6,13 +6,13 @@ import { redirect } from 'next/navigation'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 
 export async function adminLogin(formData: FormData) {
-  const email = (formData.get('email') as string)?.trim()
-  const password = formData.get('password') as string
+  const email = (formData.get('email') as string)?.trim().toLowerCase()
+  const password = (formData.get('password') as string)?.trim()
 
-  const targetEmail = (process.env.ADMIN_EMAIL || 'admin@pairly.com').toLowerCase()
-  const targetPassword = process.env.ADMIN_PASSWORD || 'admin123456'
+  const targetEmail = (process.env.ADMIN_EMAIL || 'admin@pairly.com').trim().toLowerCase()
+  const targetPassword = (process.env.ADMIN_PASSWORD || 'admin123456').trim()
 
-  if (email.toLowerCase() !== targetEmail || password !== targetPassword) {
+  if (!email || !password || email !== targetEmail || password !== targetPassword) {
     return { error: 'Invalid admin credentials.' }
   }
 
