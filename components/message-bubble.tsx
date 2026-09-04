@@ -305,14 +305,32 @@ export default function MessageBubble({
           </div>
         </div>
 
-        {/* Reaction Pill on message bubble */}
-        {activeReaction && (
-          <div
-            className={`absolute -bottom-2 ${isOwn ? 'right-2' : 'left-2'} bg-slate-900 border border-slate-700/60 rounded-full px-1.5 py-0.5 text-xs shadow-md animate-bounce`}
-          >
-            {activeReaction}
-          </div>
-        )}
+        {/* Reaction Pills on message bubble */}
+        {(() => {
+          const reactionsMap = message.reactions || {}
+          const activeEmojis = Object.entries(reactionsMap)
+            .filter(([_, userIds]) => Array.isArray(userIds) && userIds.length > 0)
+            .map(([emoji, userIds]) => ({ emoji, count: userIds.length }))
+
+          if (activeEmojis.length === 0 && !activeReaction) return null
+
+          return (
+            <div
+              className={`absolute -bottom-2.5 ${
+                isOwn ? 'right-2' : 'left-2'
+              } flex items-center gap-1 bg-slate-900 border border-slate-700/70 rounded-full px-2 py-0.5 text-xs shadow-lg z-10`}
+            >
+              {activeEmojis.length > 0
+                ? activeEmojis.map(({ emoji, count }) => (
+                    <span key={emoji} className="flex items-center gap-0.5 select-none">
+                      <span>{emoji}</span>
+                      {count > 1 && <span className="text-[10px] text-slate-300 font-semibold">{count}</span>}
+                    </span>
+                  ))
+                : activeReaction && <span className="select-none">{activeReaction}</span>}
+            </div>
+          )
+        })()}
 
         {/* Action Trigger Button on Hover / Touch */}
         <button

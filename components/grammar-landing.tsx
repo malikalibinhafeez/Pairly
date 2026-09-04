@@ -1,13 +1,43 @@
 'use client'
 
+import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+
+const LS_KEY = 'pairly_last_login_at'
+const FRESH_WINDOW_MS = 4 * 60 * 60 * 1000 // 4 hours
 
 export default function GrammarLanding() {
   const router = useRouter()
 
-  // Hidden login trigger — double-click footer year
-  const handleCopyrightDoubleClick = () => {
+  // ⚡ Prefetch routes in advance so clicking "Members" opens INSTANTLY on mobile & desktop
+  useEffect(() => {
+    router.prefetch('/auth/quick')
+    router.prefetch('/auth/login')
+  }, [router])
+
+  // Smart Members click handler:
+  // If session is fresh (< 4h) -> go to /auth/quick (secret code page)
+  // Otherwise -> go directly to /auth/login (full login page)
+  const handleMembersClick = (e: React.MouseEvent) => {
+    e.preventDefault()
+    try {
+      const raw = localStorage.getItem(LS_KEY)
+      if (raw) {
+        const lastLoginAt = parseInt(raw, 10)
+        if (Date.now() - lastLoginAt <= FRESH_WINDOW_MS) {
+          router.push('/auth/quick')
+          return
+        }
+      }
+    } catch {
+      /* ignore localStorage error */
+    }
     router.push('/auth/login')
+  }
+
+  // Hidden login trigger — double-click footer year
+  const handleCopyrightDoubleClick = (e: React.MouseEvent) => {
+    handleMembersClick(e)
   }
 
   return (
@@ -33,8 +63,8 @@ export default function GrammarLanding() {
             <a href="#tips" className="hover:text-emerald-600 transition-colors">Tips</a>
             {/* HIDDEN LOGIN — Members par click = quick access ya full login */}
             <button
-              onClick={() => router.push('/auth/quick')}
-              className="text-gray-300 hover:text-gray-400 transition-colors text-xs font-normal"
+              onClick={handleMembersClick}
+              className="text-gray-300 hover:text-gray-400 transition-colors text-xs font-normal cursor-pointer select-none active:opacity-70"
               title=""
             >
               Members
@@ -44,8 +74,8 @@ export default function GrammarLanding() {
           <div className="flex items-center gap-2">
             {/* Members — mobile par bhi dikha, faded text so only known users notice */}
             <button
-              onClick={() => router.push('/auth/quick')}
-              className="text-gray-300 hover:text-gray-500 transition-colors text-xs font-normal px-2 py-1 sm:hidden"
+              onClick={handleMembersClick}
+              className="text-gray-300 hover:text-gray-500 transition-colors text-xs font-normal px-2.5 py-1.5 sm:hidden cursor-pointer select-none active:opacity-70"
             >
               Members
             </button>

@@ -30,21 +30,15 @@ export default function AutoLogoutListener() {
       }
     }
 
-    function handleBlur() {
-      handleAutoLogout()
-    }
-
     function handlePageHide() {
       handleAutoLogout()
     }
 
     document.addEventListener('visibilitychange', handleVisibilityChange)
-    window.addEventListener('blur', handleBlur)
     window.addEventListener('pagehide', handlePageHide)
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange)
-      window.removeEventListener('blur', handleBlur)
       window.removeEventListener('pagehide', handlePageHide)
     }
   }, [router, supabase])

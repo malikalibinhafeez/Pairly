@@ -73,6 +73,8 @@ export default function ChatClient({
     }
   }, [chatId, currentUserId, supabase])
 
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
+
   // 👁️ 2. MARK MESSAGES AS SEEN (READ RECEIPTS)
   const markMessagesAsSeen = useCallback(async () => {
     const hasUnread = messages.some(
@@ -85,6 +87,16 @@ export default function ChatClient({
           m.sender_id !== currentUserId ? { ...m, seen: true } : m
         )
       )
+
+      // Broadcast to partner in real-time
+      if (channelRef.current) {
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'messages_read',
+          payload: { readerId: currentUserId },
+        })
+      }
+
       await fetch('/api/messages/read', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -97,10 +109,15 @@ export default function ChatClient({
     markMessagesAsSeen()
   }, [messages.length, markMessagesAsSeen])
 
-  // 📡 3. REALTIME MESSAGES SUBSCRIPTION
+  // 📡 3. REALTIME MESSAGES, SEEN RECEIPTS, & REACTIONS SUBSCRIPTION
   useEffect(() => {
-    const channel = supabase
-      .channel(`chat:${chatId}`)
+    const channel = supabase.channel(`chat:${chatId}`, {
+      config: { broadcast: { self: true } },
+    })
+
+    channelRef.current = channel
+
+    channel
       .on(
         'postgres_changes',
         {
@@ -134,12 +151,46 @@ export default function ChatClient({
           }
         }
       )
+      .on('broadcast', { event: 'messages_read' }, (payload) => {
+        const { readerId } = payload.payload || {}
+        if (readerId && readerId !== currentUserId) {
+          // Partner has read our messages -> mark sent messages as seen = true (sky blue ✓✓)
+          setMessages((prev) =>
+            prev.map((m) => (m.sender_id === currentUserId ? { ...m, seen: true } : m))
+          )
+        }
+      })
+      .on('broadcast', { event: 'message_reaction' }, (payload) => {
+        const { messageId, emoji, userId } = payload.payload || {}
+        if (messageId && emoji && userId) {
+          setMessages((prev) =>
+            prev.map((m) => {
+              if (m.id === messageId) {
+                const currentReactions = m.reactions || {}
+                const userList = currentReactions[emoji] || []
+                const updatedList = userList.includes(userId)
+                  ? userList.filter((id) => id !== userId)
+                  : [...userList, userId]
+                return {
+                  ...m,
+                  reactions: {
+                    ...currentReactions,
+                    [emoji]: updatedList,
+                  },
+                }
+              }
+              return m
+            })
+          )
+        }
+      })
       .subscribe()
 
     return () => {
       supabase.removeChannel(channel)
+      channelRef.current = null
     }
-  }, [chatId, supabase])
+  }, [chatId, currentUserId, supabase])
 
   // Send Text Message (with optional Quoted Reply)
   async function sendText(e: React.FormEvent) {
@@ -269,23 +320,51 @@ export default function ChatClient({
   )
 
   // React to message with emoji
-  const handleReact = useCallback((messageId: string, emoji: string) => {
-    setMessages((prev) =>
-      prev.map((m) => {
-        if (m.id === messageId) {
-          const currentReactions = m.reactions || {}
-          return {
-            ...m,
-            reactions: {
-              ...currentReactions,
-              [emoji]: [currentUserId],
-            },
+  const handleReact = useCallback(
+    async (messageId: string, emoji: string) => {
+      // 1. Optimistic local UI update
+      setMessages((prev) =>
+        prev.map((m) => {
+          if (m.id === messageId) {
+            const currentReactions = m.reactions || {}
+            const userList = currentReactions[emoji] || []
+            const updatedList = userList.includes(currentUserId)
+              ? userList.filter((id) => id !== currentUserId)
+              : [...userList, currentUserId]
+            return {
+              ...m,
+              reactions: {
+                ...currentReactions,
+                [emoji]: updatedList,
+              },
+            }
           }
-        }
-        return m
-      })
-    )
-  }, [currentUserId])
+          return m
+        })
+      )
+
+      // 2. Broadcast reaction to partner instantly via Realtime
+      if (channelRef.current) {
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'message_reaction',
+          payload: { messageId, emoji, userId: currentUserId },
+        })
+      }
+
+      // 3. Persist reaction to DB
+      try {
+        await fetch('/api/messages/reaction', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messageId, emoji, chatId }),
+        })
+      } catch {
+        // ignore
+      }
+    },
+    [chatId, currentUserId]
+  )
 
   return (
     <div className="flex flex-col h-[100dvh] bg-slate-950 overflow-hidden relative select-none">
