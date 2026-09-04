@@ -2,10 +2,12 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import MessageBubble, { Message } from '@/components/message-bubble'
 import FileUpload from '@/components/file-upload'
 import VoiceRecorder from '@/components/voice-recorder'
+import AutoLogoutListener from '@/components/auto-logout-listener'
 
 interface Props {
   chatId: string
@@ -21,6 +23,7 @@ export default function ChatClient({
   partnerUsername,
   initialMessages,
 }: Props) {
+  const router = useRouter()
   const [messages, setMessages] = useState<Message[]>(initialMessages)
   const [text, setText] = useState('')
   const [uploading, setUploading] = useState(false)
@@ -31,6 +34,15 @@ export default function ChatClient({
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const supabase = createClient()
+
+  // 🔄 Auto-refresh sync interval so browser content updates automatically without manual reload
+  useEffect(() => {
+    const interval = setInterval(() => {
+      router.refresh()
+    }, 3000)
+
+    return () => clearInterval(interval)
+  }, [router])
 
   // Scroll to bottom when new messages arrive
   useEffect(() => {

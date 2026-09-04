@@ -1,9 +1,8 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
-import { logout } from '@/app/auth/actions'
 import { deleteChat } from './actions'
-import DashboardClient from './dashboard-client'
+import DashboardClient, { LogoutButton } from './dashboard-client'
 
 export default async function DashboardPage() {
   const supabase = await createClient()
@@ -113,15 +112,7 @@ export default async function DashboardPage() {
           </div>
           <div className="flex items-center gap-3">
             <span className="text-sm text-slate-400 hidden sm:block">@{profile?.username}</span>
-            <form action={logout}>
-              <button
-                id="logout-btn"
-                type="submit"
-                className="text-sm px-3.5 py-1.5 rounded-xl bg-slate-800/60 hover:bg-slate-700/60 text-slate-400 hover:text-white border border-slate-700/40 transition-all"
-              >
-                Sign out
-              </button>
-            </form>
+            <LogoutButton />
           </div>
         </div>
       </header>

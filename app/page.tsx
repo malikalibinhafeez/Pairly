@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import GrammarLanding from '@/components/grammar-landing'
 
 export default async function Home() {
   const supabase = await createClient()
@@ -7,7 +8,8 @@ export default async function Home() {
 
   if (user) {
     redirect('/dashboard')
-  } else {
-    redirect('/auth/login')
   }
+
+  // If not logged in, show the grammar landing page (disguise)
+  return <GrammarLanding />
 }

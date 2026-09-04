@@ -8,8 +8,9 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Pairly — Private Messaging for Two",
-  description: "Pairly is a secure, real-time private chat app designed for just two people. Connect with a code and start messaging instantly.",
+  title: "GrammarMaster — Learn English Grammar the Smart Way",
+  description: "Master English grammar with clear lessons, interactive exercises, and real examples. From tenses to punctuation — your complete grammar guide.",
+  keywords: "English grammar, learn grammar, tenses, parts of speech, sentence structure, grammar exercises",
 };
 
 export const viewport: Viewport = {

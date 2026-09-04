@@ -19,6 +19,9 @@ export default function LoginPage() {
     if (result?.error) {
       setError(result.error)
       setLoading(false)
+    } else {
+      // Mark the time of this full login so quick-access can check freshness
+      localStorage.setItem('pairly_last_login_at', Date.now().toString())
     }
   }
 

@@ -10,46 +10,62 @@ interface VoiceRecorderProps {
 export default function VoiceRecorder({ onAudioRecorded, disabled }: VoiceRecorderProps) {
   const [isRecording, setIsRecording] = useState(false)
   const [recordingTime, setRecordingTime] = useState(0)
+  const [supported, setSupported] = useState(true)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
-  const timerRef = useRef<NodeJS.Timeout | null>(null)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
 
   useEffect(() => {
+    // Check if browser supports microphone
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setSupported(false)
+    }
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
+      // Clean up stream on unmount
+      streamRef.current?.getTracks().forEach((t) => t.stop())
     }
   }, [])
+
+  // Pick the best supported MIME type
+  function getSupportedMimeType(): string {
+    const types = [
+      'audio/mp4',
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/ogg;codecs=opus',
+      'audio/ogg',
+    ]
+    for (const type of types) {
+      try {
+        if (MediaRecorder.isTypeSupported(type)) return type
+      } catch {
+        // ignore
+      }
+    }
+    return '' // browser will pick default
+  }
 
   async function startRecording() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      streamRef.current = stream
       audioChunksRef.current = []
 
-      // Pick MIME type supported by browser
-      let mimeType = 'audio/webm'
-      if (!MediaRecorder.isTypeSupported('audio/webm')) {
-        if (MediaRecorder.isTypeSupported('audio/mp4')) {
-          mimeType = 'audio/mp4'
-        } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
-          mimeType = 'audio/ogg'
-        }
-      }
-
-      const mediaRecorder = new MediaRecorder(stream, { mimeType })
+      const mimeType = getSupportedMimeType()
+      const options = mimeType ? { mimeType } : {}
+      const mediaRecorder = new MediaRecorder(stream, options)
       mediaRecorderRef.current = mediaRecorder
 
       mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
+        if (e.data && e.data.size > 0) {
           audioChunksRef.current.push(e.data)
         }
       }
 
-      mediaRecorder.onstop = () => {
-        // Stop stream tracks
-        stream.getTracks().forEach((track) => track.stop())
-      }
-
-      mediaRecorder.start(100)
+      // Request data every 250ms so we always have chunks
+      mediaRecorder.start(250)
       setIsRecording(true)
       setRecordingTime(0)
 
@@ -57,29 +73,49 @@ export default function VoiceRecorder({ onAudioRecorded, disabled }: VoiceRecord
         setRecordingTime((prev) => prev + 1)
       }, 1000)
     } catch (err) {
-      console.error('Microphone permission or recording error:', err)
-      alert('Microphone access is required to record voice notes.')
+      console.error('Microphone error:', err)
+      alert('Microphone access is required. Please allow microphone permission and try again.')
     }
   }
 
   function stopAndSend() {
-    if (!mediaRecorderRef.current || !isRecording) return
-
-    if (timerRef.current) clearInterval(timerRef.current)
-
     const mediaRecorder = mediaRecorderRef.current
-    mediaRecorder.onstop = () => {
-      mediaRecorder.stream.getTracks().forEach((track) => track.stop())
+    if (!mediaRecorder || !isRecording) return
 
-      const audioBlob = new Blob(audioChunksRef.current, {
-        type: mediaRecorder.mimeType || 'audio/webm',
-      })
-      const ext = mediaRecorder.mimeType.includes('mp4') ? 'm4a' : 'webm'
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+
+    // Request any remaining buffered data before stopping
+    try { mediaRecorder.requestData() } catch { /* ignore */ }
+
+    mediaRecorder.onstop = () => {
+      // Stop all tracks
+      streamRef.current?.getTracks().forEach((t) => t.stop())
+      streamRef.current = null
+
+      const chunks = audioChunksRef.current
+      if (chunks.length === 0) {
+        setIsRecording(false)
+        setRecordingTime(0)
+        return
+      }
+
+      const usedMimeType = mediaRecorder.mimeType || 'audio/webm'
+      const audioBlob = new Blob(chunks, { type: usedMimeType })
+
+      // Pick file extension based on MIME type
+      let ext = 'webm'
+      if (usedMimeType.includes('mp4')) ext = 'm4a'
+      else if (usedMimeType.includes('ogg')) ext = 'ogg'
+
       const audioFile = new File([audioBlob], `voice-note-${Date.now()}.${ext}`, {
-        type: audioBlob.type,
+        type: usedMimeType,
       })
 
       onAudioRecorded(audioFile)
+      audioChunksRef.current = []
       setIsRecording(false)
       setRecordingTime(0)
     }
@@ -88,19 +124,23 @@ export default function VoiceRecorder({ onAudioRecorded, disabled }: VoiceRecord
   }
 
   function cancelRecording() {
-    if (!mediaRecorderRef.current || !isRecording) return
-
-    if (timerRef.current) clearInterval(timerRef.current)
-
     const mediaRecorder = mediaRecorderRef.current
-    mediaRecorder.onstop = () => {
-      mediaRecorder.stream.getTracks().forEach((track) => track.stop())
-      setIsRecording(false)
-      setRecordingTime(0)
-      audioChunksRef.current = []
+    if (!mediaRecorder || !isRecording) return
+
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
     }
 
-    mediaRecorder.stop()
+    mediaRecorder.onstop = () => {
+      streamRef.current?.getTracks().forEach((t) => t.stop())
+      streamRef.current = null
+      audioChunksRef.current = []
+      setIsRecording(false)
+      setRecordingTime(0)
+    }
+
+    try { mediaRecorder.stop() } catch { /* ignore */ }
   }
 
   function formatTime(seconds: number) {
@@ -109,24 +149,28 @@ export default function VoiceRecorder({ onAudioRecorded, disabled }: VoiceRecord
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`
   }
 
+  // Browser does not support recording
+  if (!supported) return null
+
+  // Recording in progress — show waveform UI
   if (isRecording) {
     return (
-      <div className="flex items-center gap-2 bg-slate-800/90 border border-slate-700/60 rounded-2xl px-3 py-2 text-white animate-fade-in w-full">
-        {/* Recording pulsing dot */}
+      <div className="flex items-center gap-2 bg-slate-800/90 border border-slate-700/60 rounded-2xl px-3 py-2 text-white w-full">
+        {/* Pulsing recording dot */}
         <div className="flex items-center gap-2 flex-1 min-w-0">
-          <span className="relative flex h-3 w-3">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+          <span className="relative flex h-3 w-3 shrink-0">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500" />
           </span>
           <span className="font-mono text-sm font-semibold text-red-400">
             {formatTime(recordingTime)}
           </span>
           <span className="text-xs text-slate-400 truncate hidden sm:inline">
-            Recording voice note…
+            Recording…
           </span>
         </div>
 
-        {/* Cancel Recording */}
+        {/* Cancel */}
         <button
           type="button"
           onClick={cancelRecording}
@@ -134,15 +178,15 @@ export default function VoiceRecorder({ onAudioRecorded, disabled }: VoiceRecord
           title="Cancel recording"
         >
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
           </svg>
         </button>
 
-        {/* Send Recording */}
+        {/* Send */}
         <button
           type="button"
           onClick={stopAndSend}
-          className="p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white transition-all shadow-md shrink-0 flex items-center justify-center"
+          className="p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white transition-all shadow-md shrink-0 flex items-center justify-center min-w-[40px] min-h-[40px]"
           title="Send voice note"
         >
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
@@ -153,6 +197,7 @@ export default function VoiceRecorder({ onAudioRecorded, disabled }: VoiceRecord
     )
   }
 
+  // Idle state — mic button
   return (
     <button
       type="button"

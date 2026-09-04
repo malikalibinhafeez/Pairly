@@ -1,8 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { connectWithCode, deleteChat } from './actions'
+import AutoLogoutListener from '@/components/auto-logout-listener'
+import { createClient } from '@/lib/supabase/client'
 
 interface Chat {
   id: string
@@ -16,8 +19,22 @@ interface Props {
 }
 
 export default function DashboardClient({ connectionCode, chatList, username }: Props) {
+  const router = useRouter()
+
+  // 🔄 Auto-refresh background sync so user never has to manually reload browser
+  useEffect(() => {
+    const interval = setInterval(() => {
+      router.refresh()
+    }, 4000)
+
+    return () => clearInterval(interval)
+  }, [router])
+
   return (
     <div className="space-y-6">
+      {/* 🔒 Auto-logout listener on app switch or tab blur */}
+      <AutoLogoutListener />
+
       {/* Your Code Card */}
       <div className="bg-slate-900/60 backdrop-blur-sm border border-slate-700/40 rounded-2xl p-6">
         <div className="flex items-center gap-2 mb-4">
@@ -81,6 +98,35 @@ export default function DashboardClient({ connectionCode, chatList, username }: 
         )}
       </div>
     </div>
+  )
+}
+
+/**
+ * Exported logout button — clears localStorage timestamp so quick-access
+ * is invalidated after an explicit sign out.
+ */
+export function LogoutButton() {
+  const router = useRouter()
+  const [loading, setLoading] = useState(false)
+
+  async function handleLogout() {
+    setLoading(true)
+    try { localStorage.removeItem('pairly_last_login_at') } catch { /* ignore */ }
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    router.push('/')
+    router.refresh()
+  }
+
+  return (
+    <button
+      id="logout-btn"
+      onClick={handleLogout}
+      disabled={loading}
+      className="text-sm px-3.5 py-1.5 rounded-xl bg-slate-800/60 hover:bg-slate-700/60 text-slate-400 hover:text-white border border-slate-700/40 transition-all disabled:opacity-50"
+    >
+      {loading ? 'Signing out…' : 'Sign out'}
+    </button>
   )
 }
 
@@ -235,4 +281,3 @@ function ChatRow({ chatId, partnerUsername }: { chatId: string; partnerUsername:
     </div>
   )
 }
-
