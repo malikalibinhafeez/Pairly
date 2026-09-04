@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (file.size > MAX_SIZE) {
-    return NextResponse.json({ error: 'File too large (max 10MB)' }, { status: 400 })
+    return NextResponse.json({ error: 'File too large (max 25MB)' }, { status: 400 })
   }
 
   // Verify user is a chat participant

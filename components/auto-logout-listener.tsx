@@ -17,8 +17,6 @@ export default function AutoLogoutListener() {
       } catch {
         // ignore
       }
-      // Clear the quick-access session timestamp so next entry requires full login
-      try { localStorage.removeItem(LS_KEY) } catch { /* ignore */ }
       // Redirect to grammar landing (disguise) instead of exposing login page
       router.push('/')
       router.refresh()

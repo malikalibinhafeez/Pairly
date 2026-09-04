@@ -41,6 +41,8 @@ CREATE TABLE public.messages (
   file_path TEXT,
   file_type TEXT,
   file_size BIGINT,
+  seen BOOLEAN DEFAULT false NOT NULL,
+  reactions JSONB DEFAULT '{}'::jsonb,
   deleted_for_everyone BOOLEAN DEFAULT false NOT NULL,
   created_at TIMESTAMPTZ DEFAULT now() NOT NULL
 );

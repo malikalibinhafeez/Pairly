@@ -9,10 +9,10 @@ const FRESH_WINDOW_MS = 4 * 60 * 60 * 1000
 const LS_KEY = 'pairly_last_login_at'
 
 interface Props {
-  username: string | null
+  username?: string | null
 }
 
-export default function QuickAccessClient({ username }: Props) {
+export default function QuickAccessClient({ username }: Props = {}) {
   const router = useRouter()
   const [checking, setChecking] = useState(true)   // checking localStorage
   const [code, setCode] = useState('')
@@ -53,8 +53,10 @@ export default function QuickAccessClient({ username }: Props) {
     if (result?.error) {
       setError(result.error)
       setLoading(false)
+    } else {
+      // Refresh quick access timestamp on successful verification
+      try { localStorage.setItem(LS_KEY, Date.now().toString()) } catch { /* ignore */ }
     }
-    // On success, server action redirects to /dashboard — no extra client code needed
   }
 
   // While checking localStorage, show nothing (avoids flash)

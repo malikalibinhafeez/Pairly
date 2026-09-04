@@ -19,6 +19,8 @@ export default function RegisterPage() {
     if (result?.error) {
       setError(result.error)
       setLoading(false)
+    } else {
+      localStorage.setItem('pairly_last_login_at', Date.now().toString())
     }
   }
 

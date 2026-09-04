@@ -8,7 +8,7 @@ interface FileUploadProps {
 }
 
 const ALLOWED = ['image/jpeg','image/png','image/webp','image/gif','video/mp4','video/webm','video/quicktime']
-const MAX_SIZE = 10 * 1024 * 1024
+const MAX_SIZE = 25 * 1024 * 1024
 
 export default function FileUpload({ onFileSelected, uploading }: FileUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null)
@@ -26,7 +26,7 @@ export default function FileUpload({ onFileSelected, uploading }: FileUploadProp
     }
 
     if (file.size > MAX_SIZE) {
-      setError('File must be under 10 MB.')
+      setError('File must be under 25 MB.')
       if (inputRef.current) inputRef.current.value = ''
       setTimeout(() => setError(null), 4000)
       return
